@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Attendance </title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+    body { background: #f0f2f5; display: flex; justify-content: center; padding: 20px; }
+    .card { background: white; width: 100%; max-width: 400px; border-radius: 15px; padding: 25px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+    h2 { color: #1a73e8; text-align: center; margin-bottom: 20px; }
+    label { font-size: 12px; font-weight: bold; color: #555; display: block; margin-top: 15px; }
+    input, textarea { width: 100%; padding: 12px; margin-top: 5px; border: 1px solid #ddd; border-radius: 8px; }
+    .btn { width: 100%; padding: 15px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 20px; transition: 0.3s; }
+    .btn-primary { background: #1a73e8; color: white; }
+    .btn-logout { background: #feeef0; color: #d93025; margin-top: 10px; font-size: 13px; padding: 8px; }
+    .cam-box { width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 10px; overflow: hidden; margin-top: 10px; position: relative; }
+    video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    .status-pill { display: inline-block; padding: 4px 10px; border-radius: 15px; font-size: 11px; margin-top: 8px; font-weight: bold; }
+    .ok { background: #e6f4ea; color: #1e8e3e; }
+    .err { background: #fce8e6; color: #d93025; }
+    #dashboard { display: none; }
+    #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 12px 25px; border-radius: 30px; color: white; background: #333; display: none; z-index: 1000; }
+  </style>
+</head>
+<body>
+
+<div id="toast"></div>
+
+<div class="card">
+  <!-- LOGIN SECTION -->
+  <div id="loginSection">
+    <h2>🎓 Student Login</h2>
+    <label>Roll Number</label>
+    <input type="text" id="rollNo" placeholder="Enter Roll Number">
+    <label>Password</label>
+    <input type="password" id="password" placeholder="Enter Password">
+    <button class="btn btn-primary" onclick="login()">Login</button>
+  </div>
+
+  <!-- DASHBOARD SECTION -->
+  <div id="dashboard">
+    <h3 id="welcomeName">Welcome</h3>
+    <p id="studentMeta" style="font-size: 13px; color: #666;"></p>
+    
+    <div class="cam-box">
+      <video id="video" autoplay playsinline></video>
+    </div>
+    
+    <div id="camStatus" class="status-pill err">Camera: Off</div>
+    <div id="gpsStatus" class="status-pill err">GPS: Off</div>
+
+    <label>Remark (Optional)</label>
+    <textarea id="remark" rows="2"></textarea>
+
+    <button class="btn btn-primary" id="submitBtn" onclick="submitAttendance()">Mark Attendance</button>
+    <button class="btn btn-logout" onclick="logout()">Logout</button>
+  </div>
+</div>
+
+<script>
+var SCRIPT_URL = "https://script.google.com/macros/s/AKfycby3psyXXKEPZmdT8aGIqCyfHO8E-I4gb9x6KrpEXTAMZCZUP5m_orU56g6I6vK2hari/exec"; 
+var userData = {};
+var gpsData = "No GPS";
+var stream = null;
+
+function showToast(msg, isErr = false) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.style.background = isErr ? "#d93025" : "#333";
+  t.style.display = "block";
+  setTimeout(() => t.style.display = "none", 4000);
+}
+
+async function login() {
+  const roll = document.getElementById("rollNo").value;
+  const pass = document.getElementById("password").value;
+  if(!roll || !pass) return showToast("Enter credentials", true);
+
+  const url = `${SCRIPT_URL}?action=login&rollNo=${roll}&password=${pass}&callback=authCB`;
+  const script = document.createElement("script");
+  script.src = url;
+  document.body.appendChild(script);
+}
+
+window.authCB = (res) => {
+  if(res.success) {
+    userData = { rollNo: document.getElementById("rollNo").value, password: document.getElementById("password").value, ...res };
+    document.getElementById("loginSection").style.display = "none";
+    document.getElementById("dashboard").style.display = "block";
+    document.getElementById("welcomeName").textContent = "Hi, " + res.name;
+    document.getElementById("studentMeta").textContent = res.course + " | Sem " + res.semester;
+    startCamera();
+    startGPS();
+  } else {
+    showToast(res.message, true);
+  }
+};
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+    document.getElementById("video").srcObject = stream;
+    document.getElementById("camStatus").className = "status-pill ok";
+    document.getElementById("camStatus").textContent = "Camera: Active";
+  } catch (e) {
+    showToast("Camera access denied");
+  }
+}
+
+function startGPS() {
+  navigator.geolocation.getCurrentPosition(pos => {
+    gpsData = pos.coords.latitude + ", " + pos.coords.longitude;
+    document.getElementById("gpsStatus").className = "status-pill ok";
+    document.getElementById("gpsStatus").textContent = "GPS: " + gpsData;
+  }, () => showToast("GPS denied"));
+}
+
+async function submitAttendance() {
+  const btn = document.getElementById("submitBtn");
+  btn.disabled = true;
+  btn.textContent = "Processing...";
+
+  const canvas = document.createElement("canvas");
+  const video = document.getElementById("video");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  const photo = canvas.toDataURL("image/jpeg", 0.6);
+
+  const payload = {
+    action: "markAttendance",
+    ...userData,
+    photo: photo,
+    gps: gpsData,
+    remark: document.getElementById("remark").value
+  };
+
+  try {
+    await fetch(SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors",
+      cache: "no-cache",
+      body: JSON.stringify(payload)
+    });
+    showToast("Success! Sheet updated.");
+    setTimeout(() => location.reload(), 3000);
+  } catch (e) {
+    showToast("Network error", true);
+    btn.disabled = false;
+  }
+}
+
+function logout() {
+  if(stream) stream.getTracks().forEach(t => t.stop());
+  location.reload();
+}
+</script>
+</body>
+</html>
